@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>HTTP Клиент</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    input, button { padding: 8px; margin: 5px 0; }
+    #urls button { margin-left: 10px; }
+    #progress { margin-top: 15px; }
+    #saved-list { margin-top: 20px; }
+    .error { color: red; }
+  </style>
+</head>
+<body>
+
+  <h2>Поиск по ключевому слову</h2>
+  <input type="text" id="keywordInput" placeholder="Введите ключевое слово" />
+  <button id="searchBtn">Найти URL</button>
+
+  <div id="urls"></div>
+
+  <div id="progress"></div>
+
+  <h3>Сохранённый контент (LocalStorage)</h3>
+  <ul id="saved-list"></ul>
+
+  <script>
+    const keywordInput = document.getElementById('keywordInput');
+    const searchBtn = document.getElementById('searchBtn');
+    const urlsDiv = document.getElementById('urls');
+    const progressDiv = document.getElementById('progress');
+    const savedList = document.getElementById('saved-list');
+
+    // Загрузка списка сохранённых файлов из LocalStorage
+    function loadSaved() {
+      savedList.innerHTML = '';
+      const saved = JSON.parse(localStorage.getItem('savedFiles') || '[]');
+      if (saved.length === 0) {
+        savedList.innerHTML = '<li>Нет сохранённого контента</li>';
+        return;
+      }
+      saved.forEach(item => {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.textContent = 'Показать';
+        btn.onclick = () => {
+  const contentDiv = document.getElementById('content');
+  if (!contentDiv) {
+    const newDiv = document.createElement('div');
+    newDiv.id = 'content';
+    document.body.appendChild(newDiv);
+  }
+
+  const isImage = item.url.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+  const content = document.getElementById('content');
+  content.innerHTML = ''; // очистить перед показом
+
+  if (isImage) {
+    const img = document.createElement('img');
+    img.src = `/download/${encodeURIComponent(item.fileName)}`;
+    // или можно: URL.createObjectURL(blob), если сохранено как blob
+    img.style.maxWidth = '100%';
+    content.appendChild(img);
+  } else {
+    content.textContent = item.content;
+  }
+};
+
+        li.textContent = item.url + ' ';
+        li.appendChild(btn);
+        savedList.appendChild(li);
+      });
+    }
+
+    loadSaved();
+
+    // Получаем список URL по ключу
+    searchBtn.onclick = async () => {
+      const keyword = keywordInput.value.trim();
+      urlsDiv.innerHTML = '';
+      progressDiv.innerHTML = '';
+
+      if (!keyword) {
+        alert('Введите ключевое слово');
+        return;
+      }
+
+      try {
+        const res = await fetch(`/keywords/${encodeURIComponent(keyword)}`);
+        if (!res.ok) {
+          const err = await res.json();
+          urlsDiv.innerHTML = `<p class="error">Ошибка: ${err.error}</p>`;
+          return;
+        }
+        const data = await res.json();
+        if (data.urls.length === 0) {
+          urlsDiv.innerHTML = 'URL не найдены';
+          return;
+        }
+
+        data.urls.forEach(url => {
+          const div = document.createElement('div');
+          div.textContent = url;
+
+          const btn = document.createElement('button');
+          btn.textContent = 'Скачать';
+          btn.onclick = () => downloadFile(url);
+          div.appendChild(btn);
+
+          urlsDiv.appendChild(div);
+        });
+      } catch (error) {
+        urlsDiv.innerHTML = `<p class="error">Ошибка запроса: ${error.message}</p>`;
+      }
+    };
+
+    // Скачать файл через сервер и сохранить в LocalStorage
+    async function downloadFile(url) {
+      progressDiv.textContent = 'Начинаем загрузку...';
+
+      try {
+        const res = await fetch('/download', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          progressDiv.innerHTML = `<span class="error">Ошибка: ${err.error}</span>`;
+          return;
+        }
+        const data = await res.json();
+        progressDiv.textContent = `Файл загружен: ${data.file}`;
+
+        // Получаем файл у сервера (как blob)
+        const fileRes = await fetch(`/download/${encodeURIComponent(data.file)}`);
+        if (!fileRes.ok) {
+          progressDiv.innerHTML = `<span class="error">Не удалось получить файл с сервера</span>`;
+          return;
+        }
+        const blob = await fileRes.blob();
+        const text = await blob.text();
+
+        // Сохраняем в localStorage (для простоты — текстовое содержимое)
+        const saved = JSON.parse(localStorage.getItem('savedFiles') || '[]');
+        saved.push({ url, content: text, fileName: data.file });
+        localStorage.setItem('savedFiles', JSON.stringify(saved));
+
+        loadSaved();
+
+      } catch (error) {
+        progressDiv.innerHTML = `<span class="error">Ошибка загрузки: ${error.message}</span>`;
+      }
+    }
+  </script>
+
+<div id="content" style="margin-top: 20px;"></div>
+
+</body>
+</html>
